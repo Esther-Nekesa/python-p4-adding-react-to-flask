@@ -1,73 +1,45 @@
-from flask import Flask, request, make_response, jsonify
-from flask_cors import CORS
-from flask_migrate import Migrate
-
+#!/usr/bin/env python3
+from flask import Flask, request, make_response
+from flask_restful import Api, Resource
+from flask_cors import CORS  # MUST have this
 from models import db, Message
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.json.compact = False
 
+# Initialize CORS - This allows your React app (port 4000) to talk to Flask (port 5555)
 CORS(app)
-migrate = Migrate(app, db)
 
 db.init_app(app)
+api = Api(app)
 
-@app.route('/messages', methods=['GET', 'POST'])
-def messages():
-    if request.method == 'GET':
-        messages = Message.query.order_by('created_at').all()
+class Messages(Resource):
+    def get(self):
+        messages = [m.to_dict() for m in Message.query.all()]
+        return make_response(messages, 200)
 
-        response = make_response(
-            jsonify([message.to_dict() for message in messages]),
-            200,
-        )
-    
-    elif request.method == 'POST':
+    def post(self):
         data = request.get_json()
-        message = Message(
-            body=data['body'],
-            username=data['username']
+        new_msg = Message(
+            username=data.get('username'),
+            body=data.get('body')
         )
-
-        db.session.add(message)
+        db.session.add(new_msg)
         db.session.commit()
+        return make_response(new_msg.to_dict(), 201)
 
-        response = make_response(
-            jsonify(message.to_dict()),
-            201,
-        )
+class MessageByID(Resource):
+    def delete(self, id):
+        msg = Message.query.filter_by(id=id).first()
+        if msg:
+            db.session.delete(msg)
+            db.session.commit()
+            return make_response("", 204)
+        return make_response({"error": "Message not found"}, 404)
 
-    return response
+api.add_resource(Messages, '/messages')
+api.add_resource(MessageByID, '/messages/<int:id>')
 
-@app.route('/messages/<int:id>', methods=['PATCH', 'DELETE'])
-def messages_by_id(id):
-    message = Message.query.filter_by(id=id).first()
-
-    if request.method == 'PATCH':
-        data = request.get_json()
-        for attr in data:
-            setattr(message, attr, data[attr])
-            
-        db.session.add(message)
-        db.session.commit()
-
-        response = make_response(
-            jsonify(message.to_dict()),
-            200,
-        )
-
-    elif request.method == 'DELETE':
-        db.session.delete(message)
-        db.session.commit()
-
-        response = make_response(
-            jsonify({'deleted': True}),
-            200,
-        )
-
-    return response
-
-if __name__ == "__main__":
-    app.run(port=5555)
+if __name__ == '__main__':
+    app.run(port=5555, debug=True)
